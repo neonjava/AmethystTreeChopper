@@ -1,0 +1,16 @@
+# =========================================================
+# AmethystTreeChopper - Custom Configuration File
+# =========================================================
+
+# Item Display Name (supports color codes & unicode prefix formatting)
+item-name: "&5\uE741&5ᴀᴍᴇᴛʜʏѕᴛ ᴛʀᴇᴇ ᴄʜᴏᴘᴘᴇʀ"
+
+# Item Lore list. Supports & color formatting.
+# The dynamic timer remaining placeholder is automatically appended to the end of the lore.
+item-lore:
+  - "&7Silk Touch"
+  - "&7Efficiency V"
+  - "&7Unbreaking III"
+  - "&7Mending"
+  - "&7Breaks Trees Instantly"
+  - "&7Self Destruct"
