@@ -1,0 +1,11 @@
+name: AmethystTreeChopper
+version: 1.0.0
+main: me.neonjava.amethysttreechopper.AmethystTreeChopperPlugin
+api-version: 1.21
+description: A temporary Netherite Axe that fells and shreds trees with custom animations and self-destructs after 3 days.
+authors: [neonjava]
+commands:
+  givechopper:
+    description: Gives the player an Amethyst Tree Chopper with a custom lifetime.
+    permission: amethysttreechopper.admin
+    usage: /givechopper [player] [days]
