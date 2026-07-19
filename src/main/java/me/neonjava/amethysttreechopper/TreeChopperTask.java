@@ -1,8 +1,8 @@
 package me.neonjava.amethysttreechopper;
 
 import org.bukkit.Bukkit;
-import org.bukkit.Sound;
-import org.bukkit.World;
+import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
@@ -17,7 +17,10 @@ public class TreeChopperTask {
     private final Block startBlock;
     private final ItemStack tool;
     
-    // Sets to keep track of blocks to break
+    // Captured snapshot to scan values safely off thread
+    private BlockSnapshot snapshot;
+
+    // Discovered blocks
     private final Set<Block> logsToBreak = new LinkedHashSet<>();
     private final Set<Block> leavesToBreak = new LinkedHashSet<>();
     
@@ -32,54 +35,92 @@ public class TreeChopperTask {
     }
 
     /**
-     * Scans and starts the asynchronous/Folia-compatible animated felling.
+     * Captures tree region state on the main thread, and starts discovery asynchronously.
      */
     public void start() {
-        // Detect tree structure
-        detectTree(startBlock);
+        // Capture snapshot block values synchronously
+        this.snapshot = BlockSnapshotCreator.captureTreeRegion(startBlock, 8);
 
-        if (logsToBreak.isEmpty()) return;
+        // Run BFS discovery calculation off-thread to avoid locking tick rates (similar to AutoTreeChop design)
+        Bukkit.getAsyncScheduler().runNow(plugin, asyncTask -> {
+            detectTreeBFS();
 
-        // Perform animation log by log, and leaves in batches
-        runAnimation();
+            // Run felling animation back on the main scheduler once BFS calculation finishes
+            if (!logsToBreak.isEmpty()) {
+                runAnimation();
+            }
+        });
     }
 
     /**
-     * Breadth-first search to detect connected tree logs and adjacent leaves.
+     * BFS detection of tree logs and leaves inside the captured snapshot (Thread-Safe).
      */
-    private void detectTree(Block start) {
-        Queue<Block> queue = new LinkedList<>();
-        queue.add(start);
-        logsToBreak.add(start);
+    private void detectTreeBFS() {
+        Queue<BlockSnapshot.LocationKey> queue = new LinkedList<>();
+        Set<BlockSnapshot.LocationKey> visited = new HashSet<>();
+        
+        Location center = startBlock.getLocation();
+        BlockSnapshot.LocationKey startKey = new BlockSnapshot.LocationKey(center);
 
-        // Find logs
+        // AutoTreeChop style: adjust start block location if we started on a base/foliage block
+        if (!isLog(snapshot.getBlockType(center))) {
+            for (BlockFace face : new BlockFace[]{BlockFace.UP, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
+                int nx = center.getBlockX() + face.getModX();
+                int ny = center.getBlockY() + face.getModY();
+                int nz = center.getBlockZ() + face.getModZ();
+                if (isLog(snapshot.getBlockType(nx, ny, nz))) {
+                    startKey = new BlockSnapshot.LocationKey(nx, ny, nz);
+                    break;
+                }
+            }
+        }
+
+        if (isLog(snapshot.getBlockType(startKey.getX(), startKey.getY(), startKey.getZ()))) {
+            queue.add(startKey);
+            visited.add(startKey);
+            logsToBreak.add(startKey.toLocation(snapshot.getWorld()).getBlock());
+        }
+
+        // BFS to traverse connected logs
         while (!queue.isEmpty() && logsToBreak.size() < MAX_LOGS) {
-            Block current = queue.poll();
+            BlockSnapshot.LocationKey current = queue.poll();
 
-            // Check surrounding 3x3x3 space for same wood type
             for (int x = -1; x <= 1; x++) {
                 for (int y = -1; y <= 1; y++) {
                     for (int z = -1; z <= 1; z++) {
-                        Block relative = current.getRelative(x, y, z);
-                        if (logsToBreak.contains(relative)) continue;
+                        if (x == 0 && y == 0 && z == 0) continue;
+                        
+                        int nx = current.getX() + x;
+                        int ny = current.getY() + y;
+                        int nz = current.getZ() + z;
+                        
+                        BlockSnapshot.LocationKey neighbor = new BlockSnapshot.LocationKey(nx, ny, nz);
+                        if (visited.contains(neighbor)) continue;
 
-                        if (isLog(relative.getType())) {
-                            logsToBreak.add(relative);
-                            queue.add(relative);
+                        Material type = snapshot.getBlockType(nx, ny, nz);
+                        if (isLog(type)) {
+                            visited.add(neighbor);
+                            queue.add(neighbor);
+                            logsToBreak.add(neighbor.toLocation(snapshot.getWorld()).getBlock());
                         }
                     }
                 }
             }
         }
 
-        // Find adjacent leaves to logs
+        // BFS-adjacent leaf scanning (2-pass model)
         for (Block log : logsToBreak) {
-            for (int x = -3; x <= 3; x++) {
-                for (int y = -1; y <= 4; y++) {
-                    for (int z = -3; z <= 3; z++) {
-                        Block relative = log.getRelative(x, y, z);
-                        if (isLeaves(relative.getType()) && !leavesToBreak.contains(relative)) {
-                            leavesToBreak.add(relative);
+            for (int x = -4; x <= 4; x++) {
+                for (int y = -1; y <= 6; y++) {
+                    for (int z = -4; z <= 4; z++) {
+                        int lx = log.getX() + x;
+                        int ly = log.getY() + y;
+                        int lz = log.getZ() + z;
+
+                        Material type = snapshot.getBlockType(lx, ly, lz);
+                        if (isLeaves(type)) {
+                            Block leafBlock = snapshot.getWorld().getBlockAt(lx, ly, lz);
+                            leavesToBreak.add(leafBlock);
                             if (leavesToBreak.size() >= MAX_LEAVES) break;
                         }
                     }
@@ -89,69 +130,67 @@ public class TreeChopperTask {
     }
 
     /**
-     * Runs the block felling animation log by log sequentially.
+     * Runs block felling animation log by log sequentially on the global scheduler.
      */
     private void runAnimation() {
         Iterator<Block> logIterator = logsToBreak.iterator();
         Iterator<Block> leavesIterator = leavesToBreak.iterator();
 
-        // We run a recurring region-based task in the world region
-        Bukkit.getRegionScheduler().runAtFixedRate(plugin, startBlock.getLocation(), task -> {
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, task -> {
             if (!player.isOnline()) {
                 task.cancel();
                 return;
             }
 
-            // Break 2 logs per tick for smooth animation
-            boolean logsLeft = false;
-            for (int i = 0; i < 2; i++) {
-                if (logIterator.hasNext()) {
-                    Block log = logIterator.next();
-                    breakBlockWithEffects(log);
-                    logsLeft = true;
+            player.getScheduler().run(plugin, pTask -> {
+                boolean logsLeft = false;
+                for (int i = 0; i < 2; i++) {
+                    if (logIterator.hasNext()) {
+                        Block log = logIterator.next();
+                        breakBlockWithEffects(log);
+                        logsLeft = true;
+                    }
                 }
-            }
 
-            // Shred 8 leaves per tick alongside wood
-            boolean leavesLeft = false;
-            for (int i = 0; i < 8; i++) {
-                if (leavesIterator.hasNext()) {
-                    Block leaf = leavesIterator.next();
-                    breakBlockWithEffects(leaf);
-                    leavesLeft = true;
+                boolean leavesLeft = false;
+                for (int i = 0; i < 8; i++) {
+                    if (leavesIterator.hasNext()) {
+                        Block leaf = leavesIterator.next();
+                        breakBlockWithEffects(leaf);
+                        leavesLeft = true;
+                    }
                 }
-            }
 
-            // Cancel the task once all elements are processed
-            if (!logsLeft && !leavesLeft) {
-                task.cancel();
-            }
+                if (!logsLeft && !leavesLeft) {
+                    task.cancel();
+                }
+            }, null);
         }, 1L, 1L);
     }
 
-    /**
-     * Breaks a block, playing Amethyst sound/particles, dropping correct items/saplings.
-     */
     private void breakBlockWithEffects(Block block) {
         if (block.isEmpty()) return;
 
         World world = block.getWorld();
         
-        // Spawn Amethyst break sound and particles
-        world.playSound(block.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_BREAK, 0.5f, 1.0f);
         world.spawnParticle(org.bukkit.Particle.BLOCK, block.getLocation().add(0.5, 0.5, 0.5), 6, block.getBlockData());
         world.spawnParticle(org.bukkit.Particle.INSTANT_EFFECT, block.getLocation().add(0.5, 0.5, 0.5), 3, 0.2, 0.2, 0.2, 0.0);
+        world.playSound(block.getLocation(), block.getBlockData().getSoundGroup().getBreakSound(), 0.5f, 1.0f);
 
-        // Break naturally honoring the tool (Silk Touch/Efficiency)
-        block.breakNaturally(tool);
+        Collection<ItemStack> drops = block.getDrops(tool);
+        for (ItemStack drop : drops) {
+            world.dropItemNaturally(block.getLocation(), drop);
+        }
+        
+        block.setType(Material.AIR, true);
     }
 
-    private boolean isLog(org.bukkit.Material material) {
+    private boolean isLog(Material material) {
         String name = material.name();
-        return name.contains("_LOG") || name.contains("_WOOD") || name.equals("MANGROVE_ROOTS");
+        return name.contains("_LOG") || name.contains("_WOOD") || name.contains("_STEM") || name.contains("_HYPHAE") || name.equals("MANGROVE_ROOTS");
     }
 
-    private boolean isLeaves(org.bukkit.Material material) {
+    private boolean isLeaves(Material material) {
         String name = material.name();
         return name.contains("_LEAVES") || name.equals("AZALEA_LEAVES") || name.equals("FLOWERING_AZALEA_LEAVES");
     }
