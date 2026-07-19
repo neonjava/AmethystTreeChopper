@@ -41,30 +41,69 @@ public class GiveChopperCommand implements CommandExecutor {
             target = (Player) sender;
         }
 
+        long lifetimeMs = 3 * 24 * 60 * 60 * 1000L; // Default 3 days
+
         if (args.length > 1) {
+            String timeStr = args[1].toLowerCase();
             try {
-                days = Long.parseLong(args[1]);
-                if (days <= 0) {
-                    sender.sendMessage(ChatColor.RED + "Days must be a positive integer.");
+                long calculatedMs = parseDuration(timeStr);
+                if (calculatedMs <= 0) {
+                    sender.sendMessage(ChatColor.RED + "Duration must be positive (e.g. 3d, 12h, 30m, or 1d12h).");
                     return true;
                 }
-            } catch (NumberFormatException e) {
-                sender.sendMessage(ChatColor.RED + "Invalid number of days: " + args[1]);
+                lifetimeMs = calculatedMs;
+            } catch (IllegalArgumentException e) {
+                sender.sendMessage(ChatColor.RED + "Invalid duration format: " + args[1] + ". Use e.g. 3d, 12h, 30m, or 1d12h");
                 return true;
             }
         }
 
-        long lifetimeMs = days * 24 * 60 * 60 * 1000L;
         ItemStack chopper = plugin.getChopperItemManager().createChopper(lifetimeMs);
         
         target.getInventory().addItem(chopper);
         target.playSound(target.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_CHIME, 1.0f, 1.0f);
-        target.sendMessage(ChatColor.GREEN + "You received the " + ChatColor.LIGHT_PURPLE + "Amethyst Tree Chopper " + ChatColor.GREEN + "with a " + days + "-day lifespan!");
+        
+        long totalSeconds = lifetimeMs / 1000;
+        long d = totalSeconds / (24 * 3600);
+        long h = (totalSeconds % (24 * 3600)) / 3600;
+        long m = (totalSeconds % 3600) / 60;
+        String readableTime = String.format("%dd %dh %dm", d, h, m);
+
+        target.sendMessage(ChatColor.GREEN + "You received the " + ChatColor.LIGHT_PURPLE + "Amethyst Tree Chopper " + ChatColor.GREEN + "with a " + readableTime + " lifespan!");
         
         if (target != sender) {
-            sender.sendMessage(ChatColor.GREEN + "Gave 1x Amethyst Tree Chopper to " + target.getName() + " with lifespan " + days + " days.");
+            sender.sendMessage(ChatColor.GREEN + "Gave 1x Amethyst Tree Chopper to " + target.getName() + " with lifespan " + readableTime + ".");
         }
 
         return true;
+    }
+
+    private long parseDuration(String input) {
+        long totalMs = 0;
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d+)([dhm])");
+        java.util.regex.Matcher matcher = pattern.matcher(input);
+        boolean matched = false;
+
+        while (matcher.find()) {
+            matched = true;
+            long val = Long.parseLong(matcher.group(1));
+            String unit = matcher.group(2);
+
+            switch (unit) {
+                case "d": totalMs += val * 24 * 60 * 60 * 1000L; break;
+                case "h": totalMs += val * 60 * 60 * 1000L; break;
+                case "m": totalMs += val * 60 * 1000L; break;
+            }
+        }
+
+        if (!matched) {
+            // Fallback to days parsing if it's just a raw number
+            try {
+                return Long.parseLong(input) * 24 * 60 * 60 * 1000L;
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException();
+            }
+        }
+        return totalMs;
     }
 }

@@ -3,6 +3,7 @@ package me.neonjava.amethysttreechopper;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Sound;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -27,7 +28,7 @@ public class ChopperListener implements Listener {
         this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.NORMAL)
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
         ItemStack mainHand = player.getInventory().getItemInMainHand();
@@ -40,11 +41,22 @@ public class ChopperListener implements Listener {
             return;
         }
 
-        // Validate that the broken block is part of a tree log (not random placed wood)
-        if (!isLog(event.getBlock().getType())) return;
+        // Validate that the broken block or the block directly above/adjacent to it is a log (handles various tree shapes)
+        boolean hasLog = isLog(event.getBlock().getType()) ||
+                         isLog(event.getBlock().getRelative(BlockFace.UP).getType()) ||
+                         isLog(event.getBlock().getRelative(BlockFace.NORTH).getType()) ||
+                         isLog(event.getBlock().getRelative(BlockFace.SOUTH).getType()) ||
+                         isLog(event.getBlock().getRelative(BlockFace.EAST).getType()) ||
+                         isLog(event.getBlock().getRelative(BlockFace.WEST).getType());
+                         
+        if (!hasLog) return;
 
         // Felling starting block
-        event.setCancelled(true); // Handled by animation
+        event.setCancelled(true); 
+        
+        // Play Amethyst break sound on the primary block the player breaks
+        event.getBlock().getWorld().playSound(event.getBlock().getLocation(), Sound.BLOCK_AMETHYST_BLOCK_BREAK, 0.9f, 1.0f);
+
         new TreeChopperTask(plugin, player, event.getBlock(), mainHand).start();
     }
 
@@ -115,6 +127,6 @@ public class ChopperListener implements Listener {
 
     private boolean isLog(org.bukkit.Material material) {
         String name = material.name();
-        return name.contains("_LOG") || name.contains("_WOOD") || name.equals("MANGROVE_ROOTS");
+        return name.contains("_LOG") || name.contains("_WOOD") || name.contains("_STEM") || name.contains("_HYPHAE") || name.equals("MANGROVE_ROOTS");
     }
 }

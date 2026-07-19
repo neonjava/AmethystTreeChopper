@@ -19,10 +19,10 @@ public class BlockSnapshotCreator {
         int cy = center.getBlockY();
         int cz = center.getBlockZ();
 
-        // Capture a bounding scan block region for async check (e.g. 16x32x16 radius)
-        for (int x = -maxRadius; x <= maxRadius; x++) {
-            for (int y = -2; y <= 36; y++) { // Trees mostly grow upwards
-                for (int z = -maxRadius; z <= maxRadius; z++) {
+        // Capture a larger bounding region (16 blocks horizontally, 42 blocks upwards)
+        for (int x = -16; x <= 16; x++) {
+            for (int y = -3; y <= 42; y++) { 
+                for (int z = -16; z <= 16; z++) {
                     Block block = startBlock.getWorld().getBlockAt(cx + x, cy + y, cz + z);
                     Material type = block.getType();
                     

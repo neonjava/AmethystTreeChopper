@@ -33,13 +33,19 @@ public class ChopperItemManager {
      * @return The custom item stack.
      */
     public ItemStack createChopper(long lifetimeMs) {
-        // TODO: Base item is a Netherite Axe as shown in user specs
+        // Base item is a Netherite Axe
         ItemStack axe = new ItemStack(Material.NETHERITE_AXE);
         ItemMeta meta = axe.getItemMeta();
         if (meta == null) return axe;
 
-        // Custom Display Name
-        meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', "&d&lAMETHYST TREE CHOPPER"));
+        // Custom Display Name loading from config
+        String configName = plugin.getConfig().getString("item-name", "&5\uE741&5ᴀᴍᴇᴛʜʏѕᴛ ᴛʀᴇᴇ ᴄʜᴏᴘᴘᴇʀ");
+        // Decode potential literal backslash representations of unicode characters
+        configName = configName.replace("\\uE741", "\uE741");
+        // Remove literal font-prefix sequence representation if it leaks into display values
+        configName = configName.replace("&#9863E7", "\uE741");
+        // If color codes precede the unicode icon, color code it correctly
+        meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', configName));
 
         // Custom Enchantments
         meta.addEnchant(Enchantment.SILK_TOUCH, 1, true);
@@ -61,27 +67,36 @@ public class ChopperItemManager {
     }
 
     /**
-     * Updates the Lore representing the countdown timer on the item meta.
      */
     public void updateLore(ItemMeta meta, long remainingMs, long totalLifetimeMs) {
+        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+
         List<String> lore = new ArrayList<>();
-        lore.add(ChatColor.GRAY + "Silk Touch");
-        lore.add(ChatColor.GRAY + "Efficiency V");
-        lore.add(ChatColor.GRAY + "Unbreaking III");
-        lore.add(ChatColor.GRAY + "Mending");
-        lore.add(ChatColor.GRAY + "Breaks Trees Instantly");
-        lore.add(ChatColor.GRAY + "Self Destruct");
+        List<String> configLore = plugin.getConfig().getStringList("item-lore");
+        
+        if (configLore != null && !configLore.isEmpty()) {
+            for (String line : configLore) {
+                lore.add(ChatColor.translateAlternateColorCodes('&', line));
+            }
+        } else {
+            // Fallback default lore values
+            lore.add(ChatColor.GRAY + "Silk Touch");
+            lore.add(ChatColor.GRAY + "Efficiency V");
+            lore.add(ChatColor.GRAY + "Unbreaking III");
+            lore.add(ChatColor.GRAY + "Mending");
+            lore.add(ChatColor.GRAY + "Breaks Trees Instantly");
+            lore.add(ChatColor.GRAY + "Self Destruct");
+        }
 
         if (remainingMs <= 0) {
-            lore.add(ChatColor.RED + "0d 0h 0m (Expired)");
+            lore.add(ChatColor.RED + "0d 0h 0m");
         } else {
             long totalSeconds = remainingMs / 1000;
             long days = totalSeconds / (24 * 3600);
             long hours = (totalSeconds % (24 * 3600)) / 3600;
             long minutes = (totalSeconds % 3600) / 60;
             
-            // Format example: 3d 0h 0m
-            lore.add(ChatColor.DARK_GRAY + String.format("%dd %dh %dm", days, hours, minutes));
+            lore.add(ChatColor.GRAY + String.format("%dd %dh %dm", days, hours, minutes));
         }
 
         meta.setLore(lore);

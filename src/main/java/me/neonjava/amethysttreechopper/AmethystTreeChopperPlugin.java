@@ -14,6 +14,9 @@ public class AmethystTreeChopperPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        // Save and initialize config values
+        saveDefaultConfig();
+
         chopperItemManager = new ChopperItemManager(this);
 
         // Register Command
